@@ -20,7 +20,7 @@ void write_hook(const char* loc) {
 }
 
 int main() {
-    volatile size_t* page = memhook_setup(read_hook, write_hook);
+    volatile size_t* page = memhook_setup(NULL, 4096, read_hook, write_hook);
     printf("memhook_setup() == %p\n", page);
     if (!page) {
         return 1;

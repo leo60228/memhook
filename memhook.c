@@ -19,6 +19,7 @@
 #endif
 
 static void* PAGE = NULL;
+static size_t SIZE = 0;
 static struct sigaction OLD_SIGSEGV;
 static size_t* FAULT_ADDR = NULL;
 static struct sigaction OLD_SIGTRAP;
@@ -28,11 +29,10 @@ static memhook_write_hook WRITE_HOOK = NULL;
 static void sigsegv_handler(int signal, siginfo_t* info, void* platform) {
     (void)signal;
 
-    long page_size = sysconf(_SC_PAGESIZE);
-    if (info->si_addr >= PAGE && info->si_addr < PAGE + page_size) {
+    if (info->si_addr >= PAGE && info->si_addr < PAGE + SIZE) {
         ucontext_t* context = platform;
         mcontext_t* mcontext = &context->uc_mcontext;
-        mprotect(PAGE, page_size, PROT_READ | PROT_WRITE);
+        mprotect(PAGE, SIZE, PROT_READ | PROT_WRITE);
         FAULT_ADDR = info->si_addr;
         READ_HOOK((char*) FAULT_ADDR);
         mcontext->gregs[REG_EFL] |= 0x100;
@@ -45,12 +45,11 @@ static void sigtrap_handler(int signal, siginfo_t* info, void* platform) {
     (void)signal;
     (void)info;
 
-    long page_size = sysconf(_SC_PAGESIZE);
     if (FAULT_ADDR) {
         ucontext_t* context = platform;
         mcontext_t* mcontext = &context->uc_mcontext;
         WRITE_HOOK((const char*) FAULT_ADDR);
-        mprotect(PAGE, page_size, PROT_NONE);
+        mprotect(PAGE, SIZE, PROT_NONE);
         mcontext->gregs[REG_EFL] &= ~0x100;
         FAULT_ADDR = NULL;
         return;
@@ -58,13 +57,20 @@ static void sigtrap_handler(int signal, siginfo_t* info, void* platform) {
     sigaction(SIGSEGV, &OLD_SIGSEGV, NULL);
 }
 
-void* memhook_setup(memhook_read_hook read, memhook_write_hook write) {
+void* memhook_setup(void* addr, size_t size, memhook_read_hook read, memhook_write_hook write) {
     READ_HOOK = read;
     WRITE_HOOK = write;
 
     long page_size = sysconf(_SC_PAGESIZE);
-    PAGE = mmap(NULL, page_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (!PAGE) return NULL;
+    size_t rounded = (size + page_size - 1) & ~(page_size - 1);
+    if (!addr) {
+        addr = mmap(NULL, rounded, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (!addr) return NULL;
+    } else {
+        mprotect(addr, rounded, PROT_NONE);
+    }
+    PAGE = addr;
+    SIZE = rounded;
 
     struct sigaction sigsegv_action;
     sigsegv_action.sa_sigaction = sigsegv_handler;
