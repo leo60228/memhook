@@ -7,6 +7,8 @@
 #include <signal.h>
 #include <errno.h>
 #include <stdatomic.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 #ifdef __x86_64__
 #ifndef REG_EFL
@@ -18,26 +20,39 @@
 #endif
 #endif
 
-static void* PAGE = NULL;
-static size_t SIZE = 0;
+typedef struct memhook_t {
+    void* page;
+    size_t size;
+    memhook_read_hook read_hook;
+    memhook_write_hook write_hook;
+    _Atomic(struct memhook_t*) next;
+} memhook_t;
+
+static _Atomic(memhook_t*) HOOKS = NULL;
 static struct sigaction OLD_SIGSEGV;
-static size_t* FAULT_ADDR = NULL;
+static _Thread_local size_t* FAULT_ADDR = NULL;
+static _Thread_local memhook_t* FAULT_HOOK = NULL;
 static struct sigaction OLD_SIGTRAP;
-static memhook_read_hook READ_HOOK = NULL;
-static memhook_write_hook WRITE_HOOK = NULL;
+static atomic_flag HANDLERS_SET = ATOMIC_FLAG_INIT;
 
 static void sigsegv_handler(int signal, siginfo_t* info, void* platform) {
     (void)signal;
+    memhook_t* hook = atomic_load(&HOOKS);
 
-    if (info->si_addr >= PAGE && info->si_addr < PAGE + SIZE) {
-        ucontext_t* context = platform;
-        mcontext_t* mcontext = &context->uc_mcontext;
-        mprotect(PAGE, SIZE, PROT_READ | PROT_WRITE);
-        FAULT_ADDR = info->si_addr;
-        READ_HOOK((char*) FAULT_ADDR, context);
-        mcontext->gregs[REG_EFL] |= 0x100;
-        return;
-    }
+    do {
+        if (info->si_addr >= hook->page && info->si_addr < hook->page + hook->size) {
+            ucontext_t* context = platform;
+            mcontext_t* mcontext = &context->uc_mcontext;
+            mprotect(hook->page, hook->size, PROT_READ | PROT_WRITE);
+            FAULT_ADDR = info->si_addr;
+            FAULT_HOOK = hook;
+            hook->read_hook((char*) FAULT_ADDR, context);
+            mcontext->gregs[REG_EFL] |= 0x100;
+            return;
+        }
+        hook = atomic_load(&hook->next);
+    } while (hook);
+
     sigaction(SIGSEGV, &OLD_SIGSEGV, NULL);
 }
 
@@ -48,18 +63,31 @@ static void sigtrap_handler(int signal, siginfo_t* info, void* platform) {
     if (FAULT_ADDR) {
         ucontext_t* context = platform;
         mcontext_t* mcontext = &context->uc_mcontext;
-        WRITE_HOOK((const char*) FAULT_ADDR, context);
-        mprotect(PAGE, SIZE, PROT_NONE);
+        FAULT_HOOK->write_hook((const char*) FAULT_ADDR, context);
+        mprotect(FAULT_HOOK->page, FAULT_HOOK->size, PROT_NONE);
         mcontext->gregs[REG_EFL] &= ~0x100;
         FAULT_ADDR = NULL;
         return;
     }
+
     sigaction(SIGSEGV, &OLD_SIGSEGV, NULL);
 }
 
+static void memhook_push(memhook_t* hook) {
+    _Atomic(memhook_t*)* tail = &HOOKS;
+    memhook_t* expected = NULL;
+    while (!atomic_compare_exchange_weak(tail, &expected, hook)) {
+        if (expected) {
+            tail = &expected->next;
+            expected = NULL;
+        }
+    }
+}
+
 void* memhook_setup(void* addr, size_t size, memhook_read_hook read, memhook_write_hook write) {
-    READ_HOOK = read;
-    WRITE_HOOK = write;
+    memhook_t* hook = malloc(sizeof(memhook_t));
+    hook->read_hook = read;
+    hook->write_hook = write;
 
     long page_size = sysconf(_SC_PAGESIZE);
     size_t rounded = (size + page_size - 1) & ~(page_size - 1);
@@ -69,22 +97,24 @@ void* memhook_setup(void* addr, size_t size, memhook_read_hook read, memhook_wri
     } else {
         mprotect(addr, rounded, PROT_NONE);
     }
-    PAGE = addr;
-    SIZE = rounded;
+    hook->page = addr;
+    hook->size = rounded;
 
-    struct sigaction sigsegv_action;
-    sigsegv_action.sa_sigaction = sigsegv_handler;
-    sigsegv_action.sa_flags = SA_SIGINFO;
-    if (sigemptyset(&sigsegv_action.sa_mask)) return NULL;
-    if (sigaction(SIGSEGV, &sigsegv_action, &OLD_SIGSEGV)) return NULL;
+    memhook_push(hook);
 
-    struct sigaction sigtrap_action;
-    sigtrap_action.sa_sigaction = sigtrap_handler;
-    sigtrap_action.sa_flags = SA_SIGINFO;
-    if (sigemptyset(&sigtrap_action.sa_mask)) return NULL;
-    if (sigaction(SIGTRAP, &sigtrap_action, &OLD_SIGTRAP)) return NULL;
+    if (!atomic_flag_test_and_set(&HANDLERS_SET)) {
+        struct sigaction sigsegv_action;
+        sigsegv_action.sa_sigaction = sigsegv_handler;
+        sigsegv_action.sa_flags = SA_SIGINFO;
+        if (sigemptyset(&sigsegv_action.sa_mask)) return NULL;
+        if (sigaction(SIGSEGV, &sigsegv_action, &OLD_SIGSEGV)) return NULL;
 
-    atomic_signal_fence(memory_order_seq_cst);
+        struct sigaction sigtrap_action;
+        sigtrap_action.sa_sigaction = sigtrap_handler;
+        sigtrap_action.sa_flags = SA_SIGINFO;
+        if (sigemptyset(&sigtrap_action.sa_mask)) return NULL;
+        if (sigaction(SIGTRAP, &sigtrap_action, &OLD_SIGTRAP)) return NULL;
+    }
 
-    return PAGE;
+    return hook->page;
 }
