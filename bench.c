@@ -18,11 +18,19 @@ void alarm_handler(int sig) {
 }
 
 void read_hook(char* loc) {
-    *loc = PAGE[loc - FAKE_PAGE];
+    int idx = loc - FAKE_PAGE;
+    int remaining = 4096 - idx;
+    int bytes = 32;
+    if (remaining < 32) bytes = remaining;
+    memcpy(loc, PAGE + idx, bytes);
 }
 
 void write_hook(const char* loc) {
-    PAGE[loc - FAKE_PAGE] = *loc;
+    int idx = loc - FAKE_PAGE;
+    int remaining = 4096 - idx;
+    int bytes = 32;
+    if (remaining < 32) bytes = remaining;
+    memcpy(PAGE + idx, loc, bytes);
 }
 
 int main() {
