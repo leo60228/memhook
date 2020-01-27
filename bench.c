@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 static char* FAKE_PAGE = NULL;
+static char* REAL_PAGE = NULL;
 static char PAGE[4096];
 static volatile sig_atomic_t ALARM = 0;
 
@@ -32,7 +33,7 @@ int main() {
     }
     FAKE_PAGE = fake_page;
 
-    char* real_page = malloc(4096);
+    REAL_PAGE = malloc(4096);
 
     char* random_data = malloc(4096);
     FILE* urandom = fopen("/dev/urandom", "rb");
@@ -46,7 +47,7 @@ int main() {
     alarm(1);
 
     while (!ALARM) {
-        memcpy(real_page, random_data, 4096);
+        memcpy(REAL_PAGE, random_data, 4096);
         __asm__ volatile("" : : : "memory");
         ++iterations;
     }
