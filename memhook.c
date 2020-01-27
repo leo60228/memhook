@@ -34,7 +34,7 @@ static void sigsegv_handler(int signal, siginfo_t* info, void* platform) {
         mcontext_t* mcontext = &context->uc_mcontext;
         mprotect(PAGE, SIZE, PROT_READ | PROT_WRITE);
         FAULT_ADDR = info->si_addr;
-        READ_HOOK((char*) FAULT_ADDR);
+        READ_HOOK((char*) FAULT_ADDR, context);
         mcontext->gregs[REG_EFL] |= 0x100;
         return;
     }
@@ -48,7 +48,7 @@ static void sigtrap_handler(int signal, siginfo_t* info, void* platform) {
     if (FAULT_ADDR) {
         ucontext_t* context = platform;
         mcontext_t* mcontext = &context->uc_mcontext;
-        WRITE_HOOK((const char*) FAULT_ADDR);
+        WRITE_HOOK((const char*) FAULT_ADDR, context);
         mprotect(PAGE, SIZE, PROT_NONE);
         mcontext->gregs[REG_EFL] &= ~0x100;
         FAULT_ADDR = NULL;

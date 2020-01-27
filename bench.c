@@ -17,7 +17,8 @@ void alarm_handler(int sig) {
     ALARM = 1;
 }
 
-void read_hook(char* loc) {
+void read_hook(char* loc, ucontext_t* ctx) {
+    (void)ctx;
     int idx = loc - FAKE_PAGE;
     int remaining = 4096 - idx;
     int bytes = 32;
@@ -25,7 +26,8 @@ void read_hook(char* loc) {
     memcpy(loc, PAGE + idx, bytes);
 }
 
-void write_hook(const char* loc) {
+void write_hook(const char* loc, ucontext_t* ctx) {
+    (void)ctx;
     int idx = loc - FAKE_PAGE;
     int remaining = 4096 - idx;
     int bytes = 32;

@@ -11,11 +11,13 @@ Small library to hook memory accesses to a page in Linux. Example:
 
 static size_t PAGE_VALUE = 1234;
 
-void read_hook(char* loc) {
+void read_hook(char* loc, ucontext_t* ctx) {
+    (void)ctx;
     memcpy(loc, &PAGE_VALUE, sizeof(size_t));
 }
 
-void write_hook(const char* loc) {
+void write_hook(const char* loc, ucontext_t* ctx) {
+    (void)ctx;
     memcpy(&PAGE_VALUE, loc, sizeof(size_t));
 }
 
