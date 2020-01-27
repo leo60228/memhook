@@ -2,17 +2,16 @@
 
 #include "memhook.h"
 #include <stdio.h>
+#include <string.h>
 
-static volatile size_t PAGE_VALUE = 1234;
+static size_t PAGE_VALUE = 1234;
 
-size_t read_hook(ptrdiff_t loc) {
-    (void)loc;
-    return PAGE_VALUE;
+void read_hook(char* loc) {
+    memcpy(loc, &PAGE_VALUE, sizeof(size_t));
 }
 
-void write_hook(ptrdiff_t loc, size_t value) {
-    (void)loc;
-    PAGE_VALUE = value;
+void write_hook(const char* loc) {
+    memcpy(&PAGE_VALUE, loc, sizeof(size_t));
 }
 
 int main() {

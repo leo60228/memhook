@@ -3,8 +3,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
-typedef size_t (*memhook_read_hook)(ptrdiff_t);
-typedef void (*memhook_write_hook)(ptrdiff_t, size_t);
+typedef void (*memhook_read_hook)(char*);
+typedef void (*memhook_write_hook)(const char*);
 
 void* memhook_setup(memhook_read_hook read, memhook_write_hook write);
 #endif
